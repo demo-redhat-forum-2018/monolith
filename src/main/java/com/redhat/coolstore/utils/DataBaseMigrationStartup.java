@@ -27,20 +27,34 @@ public class DataBaseMigrationStartup {
 
         try {
             logger.info("Initializing/migrating the database using FlyWay");
+            /*
             String serviceName = System.getenv("DB_SERVICE_PREFIX_MAPPING");
             serviceName = serviceName.substring(0,serviceName.lastIndexOf("=DB")).toUpperCase().replace("-","_");
+            */
+            String serviceName = System.getenv("DATASOURCES");
+            if (serviceName.indexOf(',') != -1) {
+              serviceName = serviceName.substring(0, serviceName.indexOf(','));
+            }
+            serviceName = serviceName.toUpperCase().replace("-","_");
             String servicePort = System.getenv(String.format("%s_SERVICE_PORT",serviceName));
             String serviceHost = System.getenv(String.format("%s_SERVICE_HOST",serviceName));
+
+            /*
             String database = System.getenv("DB_DATABASE");
             String dbConnUrl = String.format("jdbc:postgresql://%s:%s/%s",serviceHost,servicePort,database);
             logger.info("JDBC connection string used for FlyWay is " + dbConnUrl);
             String dbUser = System.getenv("DB_USERNAME");
             String dbPassword = System.getenv("DB_PASSWORD");
+            */
+
+            String database = System.getenv(String.format("%s_DATABASE",serviceName));
+            String dbConnUrl = String.format("jdbc:sqlserver://%s\\%s:%s",serviceHost,database,servicePort);
+            logger.info("JDBC connection string used for FlyWay is " + dbConnUrl);
+            String dbUser = System.getenv(String.format("%s_USERNAME",serviceName));
+            String dbPassword = System.getenv(String.format("%s_PASSWORD",serviceName));
 
             // Create the Flyway instance
             Flyway flyway = new Flyway();
-
-
 
             // Point it to the database
             flyway.setDataSource(dbConnUrl, dbUser, dbPassword);
