@@ -1,0 +1,330 @@
+kind: Template
+apiVersion: v1
+metadata:
+  annotations:
+    description: Application template Coolstore Monolith using Git source build & SQL Server
+    iconClass: icon-jboss
+    tags: eap,sqlserver,javaee,java,database,jboss,xpaas
+    version: 1.0.0
+    openshift.io/display-name: Red Hat Demos - Coolstore Monnolith using source build
+  name: coolstore-monolith-sqlserver
+labels:
+  template: coolstore-monolith-sqlserver
+message: The resources (build config, deploy config, service, imagestreams, etc) for
+  running the Coolstore Monolith SQL Server demo has been created in your project.
+objects:
+- apiVersion: v1
+  stringData:
+    database-name: "${SQLSERVER_DATABASE_NAME}"
+    database-password: "${SQLSERVER_PASSWORD}"
+    database-user: "sa"
+  kind: Secret
+  metadata:
+    annotations:
+      template.openshift.io/expose-database_name: '{.data[''database-name'']}'
+      template.openshift.io/expose-password: '{.data[''database-password'']}'
+      template.openshift.io/expose-username: '{.data[''database-user'']}'
+    labels:
+      app: coolstore
+    name: coolstore-sqlserver
+  type: Opaque
+- kind: Service
+  apiVersion: v1
+  spec:
+    ports:
+    - port: 8080
+      targetPort: 8080
+    selector:
+      deploymentConfig: coolstore
+  metadata:
+    name: coolstore
+    labels:
+      application: coolstore
+    annotations:
+      description: The web server's http port.
+      service.alpha.openshift.io/dependencies: '[{"name":"${SQLSERVER_SERVICE_NAME}","namespace":"","kind":"Service"}]'
+- kind: Service
+  apiVersion: v1
+  spec:
+    ports:
+    - port: 1433
+      targetPort: 1433
+    selector:
+      deploymentConfig: "${SQLSERVER_SERVICE_NAME}"
+  metadata:
+    name: "${SQLSERVER_SERVICE_NAME}"
+    labels:
+      application: coolstore
+    annotations:
+      description: The database server's port.
+- kind: Route
+  apiVersion: v1
+  id: coolstore-http
+  metadata:
+    name: www
+    labels:
+      application: coolstore
+    annotations:
+      description: Route for application's http service.
+  spec:
+    to:
+      name: coolstore
+- kind: ImageStream
+  apiVersion: v1
+  metadata:
+    name: coolstore
+    labels:
+      application: coolstore
+      build: coolstore
+- kind: ImageStream
+  apiVersion: image.openshift.io/v1
+  metadata:
+    name: mssql-server-linux
+  spec:
+    lookupPolicy:
+      local: false
+    tags:
+    - from:
+        kind: DockerImage
+        name: docker.io/microsoft/mssql-server-linux:latest
+      importPolicy: {}
+      name: latest
+      referencePolicy:
+        type: Source
+- kind: BuildConfig
+  apiVersion: v1
+  metadata:
+    name: coolstore
+    labels:
+      application: coolstore
+  spec:
+    source:
+      type: Git
+      git:
+        uri: ${COOLSTORE_GIT_REPOSITORY}
+        ref: ${COOLSTORE_GIT_BRANCH}
+    strategy:
+      type: Source
+      sourceStrategy:
+        env:
+        - name: CUSTOM_INSTALL_DIRECTORIES
+          value: /install
+        from:
+          kind: ImageStreamTag
+          namespace: "${IMAGE_STREAM_NAMESPACE}"
+          name: jboss-eap71-openshift:1.3
+    output:
+      to:
+        kind: ImageStreamTag
+        namespace: ""
+        name: coolstore:latest
+    triggers:
+    - type: ImageChange
+    - type: ConfigChange
+- kind: DeploymentConfig
+  apiVersion: v1
+  metadata:
+    name: coolstore
+    labels:
+      application: coolstore
+  spec:
+    strategy:
+      type: Rolling
+      rollingParams:
+        updatePeriodSeconds: 1
+        intervalSeconds: 1
+        timeoutSeconds: 600
+        maxUnavailable: 25%
+        maxSurge: 25%
+      resources: {}
+    triggers:
+    - type: ImageChange
+      imageChangeParams:
+        automatic: true
+        containerNames:
+        - coolstore
+        from:
+          kind: ImageStreamTag
+          name: coolstore:latest
+    - type: ConfigChange
+    replicas: 1
+    selector:
+      deploymentConfig: coolstore
+    template:
+      metadata:
+        name: coolstore
+        labels:
+          deploymentConfig: coolstore
+          application: coolstore
+      spec:
+        terminationGracePeriodSeconds: 75
+        containers:
+        - name: coolstore
+          image: coolstore
+          imagePullPolicy: Always
+          lifecycle:
+            preStop:
+              exec:
+                command:
+                - "/opt/eap/bin/jboss-cli.sh"
+                - "-c"
+                - ":shutdown(timeout=60)"
+          livenessProbe:
+            exec:
+              command:
+              - "/bin/bash"
+              - "-c"
+              - "/opt/eap/bin/livenessProbe.sh"
+          readinessProbe:
+            httpGet:
+              path: "/health.jsp"
+              port: 8080
+              scheme: HTTP
+            timeoutSeconds: 1
+            periodSeconds: 20
+            successThreshold: 1
+            failureThreshold: 5
+          ports:
+          - name: jolokia
+            containerPort: 8778
+            protocol: TCP
+          - name: http
+            containerPort: 8080
+            protocol: TCP
+          - name: https
+            containerPort: 8443
+            protocol: TCP
+          - name: ping
+            containerPort: 8888
+            protocol: TCP
+          env:
+          - name: DATASOURCES
+            value: "COOLSTORE"
+          - name: COOLSTORE_USERNAME
+            value: "sa"
+          - name: COOLSTORE_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                key: database-password
+                name: coolstore-sqlserver
+          - name: COOLSTORE_JNDI
+            value: "java:jboss/datasources/CoolstoreDS"
+          - name: COOLSTORE_DATABASE
+            value: "${SQLSERVER_DATABASE_NAME}"
+          - name: COOLSTORE_DRIVER
+            value: "sqlserver"
+          - name: COOLSTORE_SERVICE_HOST
+            value: "${SQLSERVER_SERVICE_NAME}"
+          - name: COOLSTORE_SERVICE_PORT
+            value: "${SQLSERVER_PORT}"
+          - name: COOLSTORE_NONXA
+            value: "true"
+          - name: COOLSTORE_URL
+            value: "jdbc:sqlserver://${SQLSERVER_SERVICE_NAME}\\\\${SQLSERVER_DATABASE_NAME}:${SQLSERVER_PORT}"
+- kind: DeploymentConfig
+  apiVersion: v1
+  metadata:
+    name: "${SQLSERVER_SERVICE_NAME}"
+    labels:
+      application: coolstore
+  spec:
+    strategy:
+      type: Recreate
+      recreateParams:
+        post:
+          failurePolicy: ignore
+          execNewPod:
+            containerName: "${SQLSERVER_SERVICE_NAME}" 
+            command:
+            - /bin/sh
+            - '-c'
+            - >-
+              sleep 10 && /opt/mssql-tools/bin/sqlcmd -U sa -P ${SQLSERVER_PASSWORD} -S
+              ${SQLSERVER_SERVICE_NAME} -Q "CREATE DATABASE ${SQLSERVER_DATABASE_NAME}"
+    triggers:
+    - type: ImageChange
+      imageChangeParams:
+        automatic: true
+        containerNames:
+        - "${SQLSERVER_SERVICE_NAME}"
+        from:
+          kind: ImageStreamTag
+          namespace: ""
+          name: mssql-server-linux:latest
+    - type: ConfigChange
+    replicas: 1
+    selector:
+      deploymentConfig: "${SQLSERVER_SERVICE_NAME}"
+    template:
+      metadata:
+        name: "${SQLSERVER_SERVICE_NAME}"
+        labels:
+          deploymentConfig: "${SQLSERVER_SERVICE_NAME}"
+          application: coolstore
+      spec:
+        terminationGracePeriodSeconds: 60
+        containers:
+        - name: "${SQLSERVER_SERVICE_NAME}"
+          image: ''
+          imagePullPolicy: IfNotPresent
+          readinessProbe:
+            tcpSocket:
+              port: 1433
+            initialDelaySeconds: 30
+            timeoutSeconds: 1
+            periodSeconds: 10
+            successThreshold: 1
+            failureThreshold: 3
+          livenessProbe:
+            tcpSocket:
+              port: 1433
+            initialDelaySeconds: 30
+            timeoutSeconds: 1
+            periodSeconds: 10
+            successThreshold: 1
+            failureThreshold: 3
+          ports:
+          - containerPort: 1433
+            protocol: TCP
+          env:
+          - name: ACCEPT_EULA
+            value: "Y"
+          - name: SA_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                key: database-password
+                name: coolstore-sqlserver
+parameters:
+- displayName: ImageStream Namespace
+  description: Namespace in which the ImageStreams for Red Hat Middleware images are
+    installed. These ImageStreams are normally installed in the openshift namespace.
+    You should only need to modify this if you've installed the ImageStreams in a
+    different namespace/project.
+  name: IMAGE_STREAM_NAMESPACE
+  value: openshift
+  required: true
+- displayName: SQL Server Service Name
+  name: SQLSERVER_SERVICE_NAME
+  value: sqlserver
+  required: true
+- displayName: SQL Server SA Password
+  name: SQLSERVER_PASSWORD
+  from: '[#-$]{1}[a-zA-Z]{10}[0-9]{2}'
+  generate: expression
+  required: true
+- displayName: SQL Server Database Name
+  name: SQLSERVER_DATABASE_NAME
+  value: monolith
+  required: true
+- displayName: SQL Server Port
+  name: SQLSERVER_PORT
+  value: "1433"
+  required: true
+- displayName: Git Repository for coolstore
+  name: COOLSTORE_GIT_REPOSITORY
+  value: https://github.com/demo-redhat-forum-2018/monolith.git
+  required: true
+- displayName: Git branch for coolstore
+  name: COOLSTORE_GIT_BRANCH
+  value: sqlserver
+  required: true
