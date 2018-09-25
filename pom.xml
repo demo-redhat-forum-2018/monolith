@@ -140,7 +140,7 @@
    
     <distributionManagement>
       <repository>
-         <id>coolstore</id>
+         <id>nexus</id>
          <url>http://nexus-nexus.ge-apps.openhybridcloud.io/content/repositories/coolstore</url>
       </repository>
     </distributionManagement>
