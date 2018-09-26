@@ -38,6 +38,18 @@
             </snapshots>
         </repository>
     </repositories>
+    
+    <distributionManagement>
+      <repository>
+         <id>nexus</id>
+         <url>http://nexus-fabric.mc-apps.openhybridcloud.io/content/repositories/releases</url>
+      </repository>
+       <snapshotRepository>
+          <id>nexus</id>
+          <url>http://nexus-fabric.mc-apps.openhybridcloud.io/content/repositories/snapshots</url>
+       </snapshotRepository>
+    </distributionManagement>
+    
     <pluginRepositories>
         <pluginRepository>
             <id>jboss-maven-repository</id>
@@ -92,25 +104,7 @@
                     <target>1.8</target>
                 </configuration>
             </plugin>
-            <plugin>
-               <groupId>org.sonatype.plugins</groupId>
-               <artifactId>nexus-staging-maven-plugin</artifactId>
-               <version>1.5.1</version>
-               <executions>
-                  <execution>
-                     <id>default-deploy</id>
-                     <phase>deploy</phase>
-                     <goals>
-                        <goal>deploy</goal>
-                     </goals>
-                  </execution>
-               </executions>
-               <configuration>
-                  <serverId>coolstore</serverId>
-                  <nexusUrl>http://nexus-fabric.mc-apps.openhybridcloud.io/content/repositories/coolstore</nexusUrl>
-                  <skipStaging>true</skipStaging>
-               </configuration>
-            </plugin>
+      
             
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
