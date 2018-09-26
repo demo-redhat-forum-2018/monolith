@@ -106,7 +106,7 @@
                   </execution>
                </executions>
                <configuration>
-                  <serverId>nexus</serverId>
+                  <serverId>coolstore</serverId>
                   <nexusUrl>http://nexus-fabric.mc-apps.openhybridcloud.io/content/repositories/coolstore</nexusUrl>
                   <skipStaging>true</skipStaging>
                </configuration>
