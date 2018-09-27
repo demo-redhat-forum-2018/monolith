@@ -14,6 +14,7 @@
 set -e
 
 # TODO
+WILDFLY_HOME=/opt/eap
 DEPLOY_DIR=$WILDFLY_HOME/standalone/deployments
 APP_NAME=ROOT.war
 
