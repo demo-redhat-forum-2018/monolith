@@ -81,6 +81,8 @@
         </pluginRepository>
     </pluginRepositories>
     <properties>
+        <timestamp>${maven.build.timestamp}</timestamp>
+        <maven.build.timestamp.format>yyyy-MM-dd HH:mm</maven.build.timestamp.format>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <hystrix.version>1.5.1</hystrix.version>
         <project.encoding>UTF-8</project.encoding>
