@@ -82,7 +82,6 @@
     </pluginRepositories>
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <maven.build.timestamp.format>yyyyMMdd'T'HHmmss</maven.build.timestamp.format>
         <hystrix.version>1.5.1</hystrix.version>
         <project.encoding>UTF-8</project.encoding>
         <version.postgresql>9.4.1207</version.postgresql>
