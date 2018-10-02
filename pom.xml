@@ -6,7 +6,7 @@
 
     <groupId>com.redhat.coolstore</groupId>
     <artifactId>monolith</artifactId>
-    <version>1.0.0-SNAPSHOT</version>
+    <version>1.1.0</version>
     <packaging>war</packaging>
     <name>monolith</name>
     
@@ -40,6 +40,7 @@
             </snapshots>
         </repository>
     </repositories>
+
     <pluginRepositories>
         <pluginRepository>
             <id>jboss-maven-repository</id>
@@ -75,18 +76,17 @@
       <repository>
          <id>nexus</id>
          <name>releases</name>
-         <url>http://gitux01.openhybridcloud.io:8081/repository/coolstore-monolith</url>
+         <url>http://gitux01.openhybridcloud.io:8081/content/repositories/releases</url>
       </repository>
        <snapshotRepository>
           <id>nexus</id>
           <name>snapshots</name>
-          <url>http://gitux01.openhybridcloud.io:8081/repository/coolstore-monolith-snapshots</url>
+          <url>http://gitux01.openhybridcloud.io:8081/content/repositories/snapshots</url>
        </snapshotRepository>
     </distributionManagement>
 
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <maven.build.timestamp.format>yyyyMMdd'T'HHmmss</maven.build.timestamp.format>
         <hystrix.version>1.5.1</hystrix.version>
         <project.encoding>UTF-8</project.encoding>
         <version.postgresql>9.4.1207</version.postgresql>
@@ -108,6 +108,8 @@
                     <target>1.8</target>
                 </configuration>
             </plugin>
+      
+            
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-war-plugin</artifactId>
@@ -153,6 +155,8 @@
             </build>
         </profile>
     </profiles>
+   
+    
     <dependencyManagement>
         <dependencies>
             <dependency>
