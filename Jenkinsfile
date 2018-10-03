@@ -101,15 +101,14 @@ node('maven') {
                 srcStream: params.OPENSHIFT_IMAGE_STREAM, destTag: 'promoteToTest', verbose: 'false'
 
         // Trigger a new deployment
-        openshiftDeploy deploymentConfig: 'coolstore', namespace: params.OPENSHIFT_TEST_PROJECT
+        openshiftDeploy deploymentConfig: 'coolstore', namespace: params.OPENSHIFT_TEST_ENVIRONMENT
     }
 
     stage('Integration Test') {
         sh "sleep 7"
 
-        // Tag the new build as "ready-for-prod"
         openshiftTag alias: 'false', destStream: params.OPENSHIFT_IMAGE_STREAM, srcTag: "${newVersion}",
-                destinationNamespace: params.OPENSHIFT_PROD_ENVIRONMENT, namespace: params.OPENSHIFT_BUILD_PROJECT,
+                destinationNamespace: params.OPENSHIFT_BUILD_PROJECT, namespace: params.OPENSHIFT_BUILD_PROJECT,
                 srcStream: params.OPENSHIFT_IMAGE_STREAM, destTag: 'promoteToProd', verbose: 'false'
     }
 
