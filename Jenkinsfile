@@ -31,25 +31,25 @@ node('maven') {
                   
         //write Nexus configfile
         writeFile file: 'mvn-settings.xml', text: """
-            <?xml version="1.0"?>
-            <settings>
-              <mirrors>
-                <mirror>
-                  <id>Nexus</id>
-                  <name>Nexus Public Mirror</name>
-                  <url>${params.NEXUS_MIRROR_URL}</url>
-                  <mirrorOf>*</mirrorOf>
-                </mirror>
-              </mirrors>
-              <servers>
-                <server>
-                  <id>nexus</id>
-                  <username>${params.NEXUS_USER}</username>
-                  <password>${params.NEXUS_PASSWORD}</password>
-                </server>
-              </servers>
-            </settings>
-            """
+<?xml version="1.0"?>
+<settings>
+  <mirrors>
+    <mirror>
+      <id>Nexus</id>
+      <name>Nexus Public Mirror</name>
+      <url>${params.NEXUS_MIRROR_URL}</url>
+      <mirrorOf>*</mirrorOf>
+    </mirror>
+  </mirrors>
+  <servers>
+    <server>
+      <id>nexus</id>
+      <username>${params.NEXUS_USER}</username>
+      <password>${params.NEXUS_PASSWORD}</password>
+    </server>
+  </servers>
+</settings>
+"""
     }
 
     def pom            = readMavenPom file: 'pom.xml'
