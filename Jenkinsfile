@@ -173,6 +173,7 @@ node('maven') {
                 }'
             """
         }
+    }
 }
 
 def getCurrentTarget() {
@@ -202,4 +203,4 @@ def getNewTarget() {
     }
     return newTarget
     }
-}
+
