@@ -138,7 +138,7 @@ node('maven') {
         // Wait for administrator confirmation
         input "Switch Production from ${currentTarget} to ${newTarget} ?"
 
-        if (${newTarget} == "blue"){
+        if ($newTarget.equals("blue")){
             // Switch blue/green
             sh """
               oc patch -n ${params.OPENSHIFT_PROD_ENVIRONMENT} route/coolstore --patch '
