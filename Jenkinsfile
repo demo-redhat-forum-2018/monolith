@@ -101,7 +101,7 @@ node('maven') {
                 srcStream: params.OPENSHIFT_IMAGE_STREAM, destTag: 'promoteToTest', verbose: 'false'
 
         // Trigger a new deployment
-        openshiftDeploy deploymentConfig: 'coolstore', namespace: params.OPENSHIFT_BUILD_PROJECT
+        openshiftDeploy deploymentConfig: 'coolstore', namespace: params.OPENSHIFT_TEST_PROJECT
     }
 
     stage('Integration Test') {
