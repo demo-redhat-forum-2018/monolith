@@ -114,9 +114,7 @@ node('jenkins-slave-skopeo') {
             openshift.withProject(openShiftTestEnv) {
                 def dc = openshift.selector('dc', 'coolstore')
                 dc.rollout().latest();
-                while (dc.object().spec.replicas != dc.object().status.availableReplicas) {
-                   sleep 5
-                }
+                dc.rollout().status();
             }
         }
 
@@ -151,9 +149,6 @@ node('jenkins-slave-skopeo') {
                 def dc = openshift.selector('dc', dcname)
                 dc.rollout().latest();
                 dc.rollout().status();
-                while (dc.object().spec.replicas != dc.object().status.availableReplicas) {
-                   sleep 5
-                }
             }
         }
     }
