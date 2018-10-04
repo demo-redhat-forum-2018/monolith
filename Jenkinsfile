@@ -1,9 +1,5 @@
 #!groovy
 /*
- * This Jenkins Pipeline depends on the following plugins :
- *  - Pipeline Utility Steps (https://plugins.jenkins.io/pipeline-utility-steps)
- *  - Credentials Binding (https://plugins.jenkins.io/credentials-binding)
- *
  * This pipeline accepts the following parameters :
  *  - OPENSHIFT_IMAGE_STREAM: The ImageStream name to use to tag the built images
  *  - OPENSHIFT_BUILD_CONFIG: The BuildConfig name to use
@@ -12,7 +8,6 @@
  *  - OPENSHIFT_BUILD_PROJECT: The OpenShift project in which builds are run
  *  - OPENSHIFT_TEST_ENVIRONMENT: The OpenShift project in which we will deploy the test version
  *  - OPENSHIFT_PROD_ENVIRONMENT: The OpenShift project in which we will deploy the prod version
- *  - OPENSHIFT_TEST_URL: The App URL in the test environment (to run the integration tests)
  *  - NEXUS_REPO_URL: The URL of your Nexus repository. Something like http://<nexushostname>/repository/maven-snapshots/
  *  - NEXUS_MIRROR_URL: The URL of your Nexus public mirror. Something like http://<nexushostname>/repository/maven-all-public/
  *  - NEXUS_USER: A nexus user allowed to push your software. Usually 'admin'.
@@ -21,7 +16,7 @@
 
 node('maven') {
 
-    slackSend channel: 'monolith', color: 'green', message: "started ${env.JOB_NAME} ${env.BUILD_NUMBER} (<${env.BUILD_URL}|Open>)"
+    slackSend channel: 'monolith', color: 'good', message: "started ${env.JOB_NAME} ${env.BUILD_NUMBER} - Have a look : (<${env.BUILD_URL})"
 
     stage ("Get Source code"){
         echo '*** Build starting ***'
@@ -74,7 +69,6 @@ node('maven') {
         sh "mvn -s mvn-settings.xml deploy -DskipTests=true -DaltDeploymentRepository=nexus::default::${params.NEXUS_REPO_URL}"
     }
 
-
     stage('Build OpenShift Image') {
 
         // Determine the war filename that we need to use later in the process
@@ -102,6 +96,8 @@ node('maven') {
 
         // Trigger a new deployment
         openshiftDeploy deploymentConfig: 'coolstore', namespace: params.OPENSHIFT_TEST_ENVIRONMENT
+
+        // PLACEHOLDER SLACK (Send TEST Route URL)
     }
 
     stage('Integration Test') {
@@ -126,7 +122,6 @@ node('maven') {
         // Trigger a new deployment
         openshiftDeploy deploymentConfig: "${params.OPENSHIFT_DEPLOYMENT_CONFIG}-${newTarget}", namespace: params.OPENSHIFT_PROD_ENVIRONMENT
         openshiftVerifyDeployment deploymentConfig: "${params.OPENSHIFT_DEPLOYMENT_CONFIG}-${newTarget}", namespace: params.OPENSHIFT_PROD_ENVIRONMENT
-        // Trigger a new deployment
     }
 
 
@@ -136,56 +131,38 @@ node('maven') {
         def currentTarget = getCurrentTarget()
 
         // Wait for administrator confirmation
-        input "Switch Production from ${currentTarget} to ${newTarget} ?"
+        input "Switch Production from coolstore-${currentTarget} to coolstore-${newTarget} ?"
+        // PLACEHOLDER SLACK (Send PROD URL + Input Link)
 
-        if ($newTarget.equals("blue")){
+        if (getBlueWeight() == "0"){
             // Switch blue/green
             sh """
-              oc patch -n ${params.OPENSHIFT_PROD_ENVIRONMENT} route/coolstore --patch '
-                {\"spec\":
-                  {\"to\":
-                    {\"kind\":\"Service\"},
-                    {\"name\":\"coolstore-blue\"},
-                    {\"weight\":\"100\"}
-                  },
-                  {\"alternateBackends\":
-                    [{{\"kind\":\"Service\"},
-                    {\"name\":\"coolstore-green\"},
-                    {\"weight\":\"0\"}}]
-                  }
-                }'
+              oc patch -n \"${params.OPENSHIFT_PROD_ENVIRONMENT}\" route/coolstore --patch '{\"spec\":{\"to\":{\"kind\":\"Service\",\"name\":\"coolstore-blue\",\"weight\":100},\"alternateBackends\":[{\"kind\":\"Service\",\"name\":\"coolstore-green\",\"weight\":0}]}}'
             """
         } else {
             // Switch blue/green
             sh """
-              oc patch -n ${params.OPENSHIFT_PROD_ENVIRONMENT} route/coolstore --patch '
-                {\"spec\":
-                  {\"to\":
-                    {\"kind\":\"Service\"},
-                    {\"name\":\"coolstore-blue\"},
-                    {\"weight\":\"0\"}
-                  },
-                  {\"alternateBackends\":
-                    [{{\"kind\":\"Service\"},
-                    {\"name\":\"coolstore-green\"},
-                    {\"weight\":\"100\"}}]
-                  }
-                }'
+              oc patch -n \"${params.OPENSHIFT_PROD_ENVIRONMENT}\" route/coolstore --patch '{\"spec\":{\"to\":{\"kind\":\"Service\",\"name\":\"coolstore-blue\",\"weight\":0},\"alternateBackends\":[{\"kind\":\"Service\",\"name\":\"coolstore-green\",\"weight\":100}]}}'
             """
         }
+
+        // PLACEHOLDER SLACK
     }
 }
 
 def getCurrentTarget() {
-    def currentTarget = getCurrentWeight()
-    if (currentTarget == 0) {
-      return "green"
+    def currentTarget = getBlueWeight()
+    echo "current Target :"
+    echo currentTarget
+    if (currentTarget == "0") {
+      currentTarget = "green"
     } else {
-      return "blue"
+      currentTarget = "blue"
     }
+    return currentTarget
 }
 
-def getCurrentWeight() {
+def getBlueWeight() {
     def currentWeight = readFile 'weight'
     return currentWeight
 }
@@ -201,6 +178,7 @@ def getNewTarget() {
     } else {
         echo "OOPS, wrong target"
     }
+    echo "new Target :"
+    echo newTarget
     return newTarget
-    }
-
+}
