@@ -12,11 +12,24 @@
  *  - NEXUS_MIRROR_URL: The URL of your Nexus public mirror. Something like http://<nexushostname>/repository/maven-all-public/
  *  - NEXUS_USER: A nexus user allowed to push your software. Usually 'admin'.
  *  - NEXUS_PASSWORD: The password of the nexus user. Usually 'admin123'.
+ *  - OVH_URL
+ *  - OVH_TOKEN
+ *  - AZURE_URL
+ *  - AZURE_TOKEN
+ *  - QUAY_REGISTRY
+ *  - QUAY_USER
+ *  - QUAY_PASSWORD
  */
 
-node('maven') {
+def newVersion
+def azureURL = env.AZURE_URL
+def azureToken = env.AZURE_TOKEN
+def ovhURL = env.OVH_URL
+def ovhToken = env.OVH_TOKEN
+def openShiftTestEnv = env.OPENSHIFT_TEST_ENVIRONMENT
+def openShiftProdEnv = env.OPENSHIFT_PROD_ENVIRONMENT
 
-    slackSend channel: 'monolith', color: 'good', message: "started ${env.JOB_NAME} ${env.BUILD_NUMBER} - Have a look : (<${env.BUILD_URL})"
+node('maven') {
 
     stage ("Get Source code"){
         echo '*** Build starting ***'
@@ -50,7 +63,7 @@ node('maven') {
     def pom            = readMavenPom file: 'pom.xml'
     def packageName    = pom.name
     def version        = pom.version
-    def newVersion     = "${version}-${BUILD_NUMBER}"
+    newVersion     = "${version}-${BUILD_NUMBER}"
     def artifactId     = pom.artifactId
     def groupId        = pom.groupId
 
@@ -80,91 +93,101 @@ node('maven') {
         // Trigger an OpenShift build in the build environment
         openshiftBuild bldCfg: params.OPENSHIFT_BUILD_CONFIG, checkForTriggeredDeployments: 'false',
                   namespace: params.OPENSHIFT_BUILD_PROJECT, showBuildLogs: 'true',
+                  apiURL: params.OVH_URL, authToken: params.OVH_TOKEN,
                   verbose: 'false', waitTime: '', waitUnit: 'sec',
                   env: [ [ name: 'WAR_FILE_URL', value: "${WAR_FILE_URL}" ] ]
+    }
+}
 
-        // Tag the new build
-        openshiftTag alias: 'false', destStream: params.OPENSHIFT_IMAGE_STREAM, destTag: "${newVersion}",
-                destinationNamespace: params.OPENSHIFT_BUILD_PROJECT, namespace: params.OPENSHIFT_BUILD_PROJECT,
-                srcStream: params.OPENSHIFT_IMAGE_STREAM, srcTag: 'latest', verbose: 'false'
+node('jenkins-slave-skopeo') {
+
+    stage('Tag Version') {
+        promoteImage("latest", newVersion)
     }
 
     stage('Deploy to TEST') {
-        openshiftTag alias: 'false', destStream: params.OPENSHIFT_IMAGE_STREAM, srcTag: "${newVersion}",
-                destinationNamespace: params.OPENSHIFT_BUILD_PROJECT, namespace: params.OPENSHIFT_BUILD_PROJECT,
-                srcStream: params.OPENSHIFT_IMAGE_STREAM, destTag: 'promoteToTest', verbose: 'false'
+
+        promoteImage(newVersion,"promoteToTest")
 
         // Trigger a new deployment
-        openshiftDeploy deploymentConfig: 'coolstore', namespace: params.OPENSHIFT_TEST_ENVIRONMENT
+        openshift.withCluster(azureURL, azureToken) {
+            openshift.withProject(openShiftTestEnv) {
+                def dc = openshift.selector('dc', 'coolstore')
+                dc.rollout().latest();
+                while (dc.object().spec.replicas != dc.object().status.availableReplicas) {
+                   sleep 5
+                }
+            }
+        }
 
         // PLACEHOLDER SLACK (Send TEST Route URL)
     }
 
     stage('Integration Test') {
-        sh "sleep 7"
+        sh "sleep 7"        
+    }
 
-        openshiftTag alias: 'false', destStream: params.OPENSHIFT_IMAGE_STREAM, srcTag: "${newVersion}",
-                destinationNamespace: params.OPENSHIFT_BUILD_PROJECT, namespace: params.OPENSHIFT_BUILD_PROJECT,
-                srcStream: params.OPENSHIFT_IMAGE_STREAM, destTag: 'promoteToProd', verbose: 'false'
+    stage('Security Test') {
+        sh "sleep 4"        
+    }
+
+    stage('Performance Test') {
+        sh "sleep 6"        
+    }
+
+    stage('Promote to PROD') {
+        promoteImage(newVersion,"promoteToProd")
     }
 
     stage('Deploy to PROD') {
-        // Yes, this is mandatory for the next command to succeed. Don't know why...
-        sh "oc project ${params.OPENSHIFT_PROD_ENVIRONMENT}"
+        openshift.withCluster(ovhURL, ovhToken) {
+            openshift.withProject(openShiftProdEnv) {
+                
+                def coolstorerouteweight = openshift.selector('route',"coolstore").object().spec.to.weight
+                sh "echo $coolstorerouteweight > weight"
+                def newTarget = getNewTarget()
+                def dcname = env.OPENSHIFT_DEPLOYMENT_CONFIG + '-' + newTarget
 
-        // Extract the route target (xxx-green or xxx-blue)
-        // This will be used by getCurrentTarget and getNewTarget methods
-        sh "oc get route coolstore -n ${params.OPENSHIFT_PROD_ENVIRONMENT} -o template --template='{{ .spec.to.weight }}' > weight"
-
-        // Flip/flop target (green goes blue and vice versa)
-        def newTarget = getNewTarget()
-
-        // Trigger a new deployment
-        openshiftDeploy deploymentConfig: "${params.OPENSHIFT_DEPLOYMENT_CONFIG}-${newTarget}", namespace: params.OPENSHIFT_PROD_ENVIRONMENT
-        openshiftVerifyDeployment deploymentConfig: "${params.OPENSHIFT_DEPLOYMENT_CONFIG}-${newTarget}", namespace: params.OPENSHIFT_PROD_ENVIRONMENT
+                def dc = openshift.selector('dc', dcname)
+                dc.rollout().latest();
+                dc.rollout().status();
+                while (dc.object().spec.replicas != dc.object().status.availableReplicas) {
+                   sleep 5
+                }
+            }
+        }
     }
 
 
     stage('Switch over to new Version') {
-        // Determine which is of green or blue is active
-        def newTarget = getNewTarget()
-        def currentTarget = getCurrentTarget()
 
-        // Wait for administrator confirmation
-        input "Switch Production from coolstore-${currentTarget} to coolstore-${newTarget} ?"
-        // PLACEHOLDER SLACK (Send PROD URL + Input Link)
+        openshift.withCluster(ovhURL, ovhToken) {
+            openshift.withProject(openShiftProdEnv) {
 
-        if (getBlueWeight() == "0"){
-            // Switch blue/green
-            sh """
-              oc patch -n \"${params.OPENSHIFT_PROD_ENVIRONMENT}\" route/coolstore --patch '{\"spec\":{\"to\":{\"kind\":\"Service\",\"name\":\"coolstore-blue\",\"weight\":100},\"alternateBackends\":[{\"kind\":\"Service\",\"name\":\"coolstore-green\",\"weight\":0}]}}'
-            """
-        } else {
-            // Switch blue/green
-            sh """
-              oc patch -n \"${params.OPENSHIFT_PROD_ENVIRONMENT}\" route/coolstore --patch '{\"spec\":{\"to\":{\"kind\":\"Service\",\"name\":\"coolstore-blue\",\"weight\":0},\"alternateBackends\":[{\"kind\":\"Service\",\"name\":\"coolstore-green\",\"weight\":100}]}}'
-            """
+                def newTarget = getNewTarget()
+                def currentTarget = getCurrentTarget()
+
+                input "Switch Production from coolstore-${currentTarget} to coolstore-${newTarget} ?"
+
+                if (newTarget == "blue"){
+                    openshift.set("route-backends", "coolstore", "coolstore-blue=100%", "coolstore-green=0%")
+                } else {
+                    openshift.set("route-backends", "coolstore", "coolstore-blue=0%", "coolstore-green=100%")
+                }
+            }
         }
-
-        // PLACEHOLDER SLACK
     }
 }
 
 def getCurrentTarget() {
-    def currentTarget = getBlueWeight()
-    echo "current Target :"
-    echo currentTarget
-    if (currentTarget == "0") {
+    def weight = readFile 'weight'
+    weight = weight.trim()
+    if (weight == "0") {
       currentTarget = "green"
     } else {
       currentTarget = "blue"
     }
     return currentTarget
-}
-
-def getBlueWeight() {
-    def currentWeight = readFile 'weight'
-    return currentWeight
 }
 
 // Flip/flop target (green goes blue and vice versa)
@@ -178,7 +201,18 @@ def getNewTarget() {
     } else {
         echo "OOPS, wrong target"
     }
-    echo "new Target :"
-    echo newTarget
     return newTarget
+}
+
+def promoteImage(srcImageTag,destImageTag) {
+    def from = "docker://${QUAY_REGISTRY}:${srcImageTag}"
+    def to = "docker://${QUAY_REGISTRY}:${destImageTag}"
+
+    echo "Now Promoting ${from} -> ${to}"
+    sh """
+        set +x
+        skopeo copy --remove-signatures \
+        --src-creds ${QUAY_USER}:${QUAY_PASSWORD} \
+        --dest-creds ${QUAY_USER}:${QUAY_PASSWORD}  --dest-tls-verify=false ${from} ${to}
+    """
 }
