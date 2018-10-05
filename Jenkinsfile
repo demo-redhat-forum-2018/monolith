@@ -14,9 +14,16 @@
  *  - NEXUS_PASSWORD: The password of the nexus user. Usually 'admin123'.
  */
 
+def newVersion
+def openShiftBuildEnv = env.OPENSHIFT_BUILD_PROJECT
+def openShiftTestEnv = env.OPENSHIFT_TEST_ENVIRONMENT
+def openShiftProdEnv = env.OPENSHIFT_PROD_ENVIRONMENT
+
 node('maven') {
 
-    slackSend channel: 'monolith', color: 'good', message: "started ${env.JOB_NAME} ${env.BUILD_NUMBER} - Have a look : (<${env.BUILD_URL})"
+  openshift.withCluster() {
+
+    slackSend channel: 'monolith', color: 'good', message: " --- Pipeline Starting --- \n Job name : ${env.JOB_NAME} \nBuild number : ${env.BUILD_NUMBER} \nCheck <${env.RUN_DISPLAY_URL}|Build logs>\n ---"
 
     stage ("Get Source code"){
         echo '*** Build starting ***'
@@ -50,9 +57,9 @@ node('maven') {
     def pom            = readMavenPom file: 'pom.xml'
     def packageName    = pom.name
     def version        = pom.version
-    def newVersion     = "${version}-${BUILD_NUMBER}"
     def artifactId     = pom.artifactId
     def groupId        = pom.groupId
+    newVersion         = "${version}-${BUILD_NUMBER}"
 
     // Using Mav build the war file
     stage('Build war file') {
@@ -71,90 +78,92 @@ node('maven') {
 
     stage('Build OpenShift Image') {
 
-        // Determine the war filename that we need to use later in the process
-        String warFileName = "${groupId}.${artifactId}"
-        warFileName = warFileName.replace('.', '/')
-        def WAR_FILE_URL = "${params.NEXUS_REPO_URL}/${warFileName}/${version}/${artifactId}-${version}.war"
-        echo "Will use WAR at ${WAR_FILE_URL}"
+        openshift.withProject(openShiftBuildEnv) {
+            // Determine the war filename that we need to use later in the process
+            String warFileName = "${groupId}.${artifactId}"
+            warFileName = warFileName.replace('.', '/')
+            def WAR_FILE_URL = "${params.NEXUS_REPO_URL}/${warFileName}/${version}/${artifactId}-${version}.war"
+            echo "Will use WAR at ${WAR_FILE_URL}"
 
-        // Trigger an OpenShift build in the build environment
-        openshiftBuild bldCfg: params.OPENSHIFT_BUILD_CONFIG, checkForTriggeredDeployments: 'false',
-                  namespace: params.OPENSHIFT_BUILD_PROJECT, showBuildLogs: 'true',
-                  verbose: 'false', waitTime: '', waitUnit: 'sec',
-                  env: [ [ name: 'WAR_FILE_URL', value: "${WAR_FILE_URL}" ] ]
+            // Trigger an OpenShift build in the build environment
+            openshift.selector("bc", "coolstore")
+                .startBuild("-e WAR_FILE_URL=${WAR_FILE_URL}","--wait=true")
 
-        // Tag the new build
-        openshiftTag alias: 'false', destStream: params.OPENSHIFT_IMAGE_STREAM, destTag: "${newVersion}",
-                destinationNamespace: params.OPENSHIFT_BUILD_PROJECT, namespace: params.OPENSHIFT_BUILD_PROJECT,
-                srcStream: params.OPENSHIFT_IMAGE_STREAM, srcTag: 'latest', verbose: 'false'
+            openshift.tag("${params.OPENSHIFT_BUILD_PROJECT}/${params.OPENSHIFT_IMAGE_STREAM}:latest",
+                "${params.OPENSHIFT_BUILD_PROJECT}/${params.OPENSHIFT_IMAGE_STREAM}:${newVersion}")
+        }
     }
 
     stage('Deploy to TEST') {
-        openshiftTag alias: 'false', destStream: params.OPENSHIFT_IMAGE_STREAM, srcTag: "${newVersion}",
-                destinationNamespace: params.OPENSHIFT_BUILD_PROJECT, namespace: params.OPENSHIFT_BUILD_PROJECT,
-                srcStream: params.OPENSHIFT_IMAGE_STREAM, destTag: 'promoteToTest', verbose: 'false'
 
-        // Trigger a new deployment
-        openshiftDeploy deploymentConfig: 'coolstore', namespace: params.OPENSHIFT_TEST_ENVIRONMENT
+        openshift.withProject(openShiftBuildEnv) {
+            openshift.tag("${params.OPENSHIFT_BUILD_PROJECT}/${params.OPENSHIFT_IMAGE_STREAM}:${newVersion}",
+                "${params.OPENSHIFT_BUILD_PROJECT}/${params.OPENSHIFT_IMAGE_STREAM}:promoteToTest")
+        }
 
-        // PLACEHOLDER SLACK (Send TEST Route URL)
+        openshift.withProject(openShiftTestEnv) {
+            def dc = openshift.selector('dc', 'coolstore')
+            dc.rollout().latest();
+            dc.rollout().status();
+
+            def appRoute = "http://" + openshift.selector('route', 'coolstore').object().spec.host
+            slackSend channel: 'monolith', color: 'good', message: "--- Test Application Deployed --- \n Namespace: ${params.OPENSHIFT_TEST_ENVIRONMENT} \n Access <${appRoute}|App> \n ---"
+        }
+
     }
 
     stage('Integration Test') {
         sh "sleep 7"
 
-        openshiftTag alias: 'false', destStream: params.OPENSHIFT_IMAGE_STREAM, srcTag: "${newVersion}",
-                destinationNamespace: params.OPENSHIFT_BUILD_PROJECT, namespace: params.OPENSHIFT_BUILD_PROJECT,
-                srcStream: params.OPENSHIFT_IMAGE_STREAM, destTag: 'promoteToProd', verbose: 'false'
+        openshift.withProject(openShiftBuildEnv) {
+            openshift.tag("${params.OPENSHIFT_BUILD_PROJECT}/${params.OPENSHIFT_IMAGE_STREAM}:${newVersion}",
+                "${params.OPENSHIFT_BUILD_PROJECT}/${params.OPENSHIFT_IMAGE_STREAM}:promoteToProd")
+        }
     }
 
     stage('Deploy to PROD') {
-        // Yes, this is mandatory for the next command to succeed. Don't know why...
-        sh "oc project ${params.OPENSHIFT_PROD_ENVIRONMENT}"
 
-        // Extract the route target (xxx-green or xxx-blue)
-        // This will be used by getCurrentTarget and getNewTarget methods
-        sh "oc get route coolstore -n ${params.OPENSHIFT_PROD_ENVIRONMENT} -o template --template='{{ .spec.to.weight }}' > weight"
+        openshift.withProject(openShiftProdEnv) {
+            def coolstorerouteweight = openshift.selector('route',"coolstore").object().spec.to.weight
+            sh "echo $coolstorerouteweight > weight"
+            def newTarget = getNewTarget()
+            def dcname = env.OPENSHIFT_DEPLOYMENT_CONFIG + '-' + newTarget
 
-        // Flip/flop target (green goes blue and vice versa)
-        def newTarget = getNewTarget()
+            def dc = openshift.selector('dc', dcname)
+            dc.rollout().latest();
+            dc.rollout().status();
 
-        // Trigger a new deployment
-        openshiftDeploy deploymentConfig: "${params.OPENSHIFT_DEPLOYMENT_CONFIG}-${newTarget}", namespace: params.OPENSHIFT_PROD_ENVIRONMENT
-        openshiftVerifyDeployment deploymentConfig: "${params.OPENSHIFT_DEPLOYMENT_CONFIG}-${newTarget}", namespace: params.OPENSHIFT_PROD_ENVIRONMENT
-    }
-
-
-    stage('Switch over to new Version') {
-        // Determine which is of green or blue is active
-        def newTarget = getNewTarget()
-        def currentTarget = getCurrentTarget()
-
-        // Wait for administrator confirmation
-        input "Switch Production from coolstore-${currentTarget} to coolstore-${newTarget} ?"
-        // PLACEHOLDER SLACK (Send PROD URL + Input Link)
-
-        if (getBlueWeight() == "0"){
-            // Switch blue/green
-            sh """
-              oc patch -n \"${params.OPENSHIFT_PROD_ENVIRONMENT}\" route/coolstore --patch '{\"spec\":{\"to\":{\"kind\":\"Service\",\"name\":\"coolstore-blue\",\"weight\":100},\"alternateBackends\":[{\"kind\":\"Service\",\"name\":\"coolstore-green\",\"weight\":0}]}}'
-            """
-        } else {
-            // Switch blue/green
-            sh """
-              oc patch -n \"${params.OPENSHIFT_PROD_ENVIRONMENT}\" route/coolstore --patch '{\"spec\":{\"to\":{\"kind\":\"Service\",\"name\":\"coolstore-blue\",\"weight\":0},\"alternateBackends\":[{\"kind\":\"Service\",\"name\":\"coolstore-green\",\"weight\":100}]}}'
-            """
+            def appRoute = "http://" + openshift.selector('route', 'coolstore').object().spec.host
+            slackSend channel: 'monolith', color: 'good', message: "--- Test Application Deployed --- \n Namespace: ${params.OPENSHIFT_TEST_ENVIRONMENT} \n Access <${appRoute}|App> \n ---"
         }
 
-        // PLACEHOLDER SLACK
     }
+
+    stage('Switch over to new Version') {
+
+        openshift.withProject(openShiftProdEnv) {
+            def newTarget = getNewTarget()
+            def currentTarget = getCurrentTarget()
+
+            slackSend channel: 'monolith', color: 'good', message: "--- Action required to Go Live --- \n Namespace: ${params.OPENSHIFT_PROD_ENVIRONMENT} \n Current Version : coolstore-${currentTarget} \n New Version : coolstore-${newTarget} \n Action : <${env.RUN_DISPLAY_URL}|Go Live> \n ---"
+            input "Switch Production from coolstore-${currentTarget} to coolstore-${newTarget} ?"
+
+            if (newTarget == "blue"){
+                openshift.set("route-backends", "coolstore", "coolstore-blue=100%", "coolstore-green=0%")
+            } else {
+                openshift.set("route-backends", "coolstore", "coolstore-blue=0%", "coolstore-green=100%")
+            }
+        }
+
+        slackSend channel: 'monolith', color: 'good', message: " --- Pipeline Terminated --- \n Check <${env.RUN_DISPLAY_URL}|Build logs>\n ---"
+    }
+  }
 }
 
 def getCurrentTarget() {
-    def currentTarget = getBlueWeight()
-    echo "current Target :"
-    echo currentTarget
-    if (currentTarget == "0") {
+    def weight = readFile 'weight'
+    weight = weight.trim()
+    if (weight == "0") {
       currentTarget = "green"
     } else {
       currentTarget = "blue"
@@ -162,12 +171,6 @@ def getCurrentTarget() {
     return currentTarget
 }
 
-def getBlueWeight() {
-    def currentWeight = readFile 'weight'
-    return currentWeight
-}
-
-// Flip/flop target (green goes blue and vice versa)
 def getNewTarget() {
     def currentTarget = getCurrentTarget()
     def newTarget = ""
@@ -178,7 +181,5 @@ def getNewTarget() {
     } else {
         echo "OOPS, wrong target"
     }
-    echo "new Target :"
-    echo newTarget
     return newTarget
 }
