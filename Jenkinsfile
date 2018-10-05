@@ -32,6 +32,8 @@ def openShiftProdEnv = env.OPENSHIFT_PROD_ENVIRONMENT
 
 node('maven') {
 
+    slackSend channel: 'monolith', color: 'good', message: " --- Pipeline Starting --- \n Job name : ${env.JOB_NAME} \nBuild number : ${env.BUILD_NUMBER} \nCheck <${env.RUN_DISPLAY_URL}|Build logs>\n ---"
+
     stage ("Get Source code"){
         echo '*** Build starting ***'
         def mvn = "mvn -s mvn-settings.xml"
@@ -116,6 +118,9 @@ node('jenkins-slave-skopeo') {
                 def dc = openshift.selector('dc', 'coolstore')
                 dc.rollout().latest();
                 dc.rollout().status();
+
+                def appRoute = "http://" + openshift.selector('route', 'coolstore').object().spec.host
+                slackSend channel: 'monolith', color: 'good', message: "--- Test Application Deployed --- \n OCP Cluster target : ${env.AZURE_URL} \n Namespace: ${params.OPENSHIFT_TEST_ENVIRONMENT} \n Access <${appRoute}|App> \n ---"
             }
         }
 
@@ -147,6 +152,9 @@ node('jenkins-slave-skopeo') {
                 def dc = openshift.selector('dc', dcname)
                 dc.rollout().latest();
                 dc.rollout().status();
+
+                def appRoute = "http://" + openshift.selector('route', 'coolstore').object().spec.host
+                slackSend channel: 'monolith', color: 'good', message: "--- Test Application Deployed --- \n OCP Cluster target : ${env.OVH_URL}\n Namespace: ${params.OPENSHIFT_TEST_ENVIRONMENT} \n Access <${appRoute}|App> \n ---"
             }
         }
     }
@@ -160,6 +168,7 @@ node('jenkins-slave-skopeo') {
                 def newTarget = getNewTarget()
                 def currentTarget = getCurrentTarget()
 
+                slackSend channel: 'monolith', color: 'good', message: "--- Action required to Go Live --- \n OCP Cluster target : ${env.OVH_URL}\n Namespace: ${params.OPENSHIFT_PROD_ENVIRONMENT} \n Current Version : coolstore-${currentTarget} \n New Version : coolstore-${newTarget} \n Action : <${env.RUN_DISPLAY_URL}|Go Live> \n ---"
                 input "Switch Production from coolstore-${currentTarget} to coolstore-${newTarget} ?"
 
                 if (newTarget == "blue"){
@@ -169,6 +178,7 @@ node('jenkins-slave-skopeo') {
                 }
             }
         }
+        slackSend channel: 'monolith', color: 'good', message: " --- Pipeline Terminated --- \n Check <${env.RUN_DISPLAY_URL}|Build logs>\n ---"
     }
 }
 
