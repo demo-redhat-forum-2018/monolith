@@ -26,6 +26,7 @@ def azureURL = env.AZURE_URL
 def azureToken = env.AZURE_TOKEN
 def ovhURL = env.OVH_URL
 def ovhToken = env.OVH_TOKEN
+def openShiftBuildEnv = env.OPENSHIFT_BUILD_PROJECT
 def openShiftTestEnv = env.OPENSHIFT_TEST_ENVIRONMENT
 def openShiftProdEnv = env.OPENSHIFT_PROD_ENVIRONMENT
 
@@ -90,12 +91,12 @@ node('maven') {
         def WAR_FILE_URL = "${params.NEXUS_REPO_URL}/${warFileName}/${version}/${artifactId}-${version}.war"
         echo "Will use WAR at ${WAR_FILE_URL}"
 
-        // Trigger an OpenShift build in the build environment
-        openshiftBuild bldCfg: params.OPENSHIFT_BUILD_CONFIG, checkForTriggeredDeployments: 'false',
-                  namespace: params.OPENSHIFT_BUILD_PROJECT, showBuildLogs: 'true',
-                  apiURL: params.OVH_URL, authToken: params.OVH_TOKEN,
-                  verbose: 'false', waitTime: '', waitUnit: 'sec',
-                  env: [ [ name: 'WAR_FILE_URL', value: "${WAR_FILE_URL}" ] ]
+        openshift.withCluster(ovhURL, ovhToken) {
+            openshift.withProject(openShiftBuildEnv) {
+                openshift.selector("bc", "coolstore").startBuild("-e WAR_FILE_URL=${WAR_FILE_URL}","--wait=true")
+            }
+        }
+        
     }
 }
 
@@ -126,11 +127,8 @@ node('jenkins-slave-skopeo') {
     }
 
     stage('Security Test') {
-        sh "sleep 4"        
-    }
-
-    stage('Performance Test') {
-        sh "sleep 6"        
+        sh "sleep 4" 
+        // call Quay to get scan result        
     }
 
     stage('Promote to PROD') {
@@ -185,7 +183,6 @@ def getCurrentTarget() {
     return currentTarget
 }
 
-// Flip/flop target (green goes blue and vice versa)
 def getNewTarget() {
     def currentTarget = getCurrentTarget()
     def newTarget = ""
