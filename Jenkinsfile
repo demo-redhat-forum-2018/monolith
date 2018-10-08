@@ -21,7 +21,7 @@ def openShiftProdEnv = env.OPENSHIFT_PROD_ENVIRONMENT
 
 node('maven') {
 
-  openshift.withCluster() {
+  openshift.withCluster("ovh","jenkins-ovh") {
 
     slackSend channel: 'monolith', color: 'good', message: " --- Pipeline Starting --- \n Job name : ${env.JOB_NAME} \nBuild number : ${env.BUILD_NUMBER} \nCheck <${env.RUN_DISPLAY_URL}|Build logs>\n ---"
 
