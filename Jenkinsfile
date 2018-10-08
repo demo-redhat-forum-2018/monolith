@@ -93,7 +93,7 @@ node('maven') {
         def WAR_FILE_URL = "${params.NEXUS_REPO_URL}/${warFileName}/${version}/${artifactId}-${version}.war"
         echo "Will use WAR at ${WAR_FILE_URL}"
 
-        openshift.withCluster(ovhURL, ovhToken) {
+        openshift.withCluster("ovh", ovhToken) {
             openshift.withProject(openShiftBuildEnv) {
                 openshift.selector("bc", "coolstore").startBuild("-e WAR_FILE_URL=${WAR_FILE_URL}","--wait=true")
             }
@@ -113,7 +113,7 @@ node('jenkins-slave-skopeo') {
         promoteImage(newVersion,"promoteToTest")
 
         // Trigger a new deployment
-        openshift.withCluster(azureURL, azureToken) {
+        openshift.withCluster("azure", azureToken) {
             openshift.withProject(openShiftTestEnv) {
                 def dc = openshift.selector('dc', 'coolstore')
                 dc.rollout().latest();
@@ -141,7 +141,7 @@ node('jenkins-slave-skopeo') {
     }
 
     stage('Deploy to PROD') {
-        openshift.withCluster(ovhURL, ovhToken) {
+        openshift.withCluster("ovh", ovhToken) {
             openshift.withProject(openShiftProdEnv) {
                 
                 def coolstorerouteweight = openshift.selector('route',"coolstore").object().spec.to.weight
@@ -162,7 +162,7 @@ node('jenkins-slave-skopeo') {
 
     stage('Switch over to new Version') {
 
-        openshift.withCluster(ovhURL, ovhToken) {
+        openshift.withCluster("ovh", ovhToken) {
             openshift.withProject(openShiftProdEnv) {
 
                 def newTarget = getNewTarget()
